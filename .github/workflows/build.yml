@@ -1,0 +1,102 @@
+name: Build L2M Boss Timer
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyqt5 pyttsx3 supabase python-dotenv pyinstaller
+
+      - name: Build Windows executable
+        run: |
+          python -m PyInstaller --clean --noconfirm build.spec
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: L2M_BossTimer_Windows
+          path: dist/L2M_BossTimer_v2.exe
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyqt5 pyttsx3 supabase python-dotenv pyinstaller
+
+      - name: Build macOS app
+        run: |
+          python -m PyInstaller --clean --noconfirm build_macos.spec
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Create DMG
+        run: |
+          create-dmg \
+            --volname "L2M Boss Timer" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "L2M_BossTimer.app" 150 190 \
+            --hide-extension "L2M_BossTimer.app" \
+            --app-drop-link 450 190 \
+            "dist/L2M_BossTimer_v2.0.0.dmg" \
+            "dist/L2M_BossTimer.app" || true
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: L2M_BossTimer_macOS
+          path: |
+            dist/L2M_BossTimer.app
+            dist/*.dmg
+
+  release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: L2M_BossTimer_Windows
+          path: windows
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: L2M_BossTimer_macOS
+          path: macos
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            windows/*
+            macos/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
