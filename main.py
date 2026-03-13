@@ -856,17 +856,23 @@ del "%~f0"
         threading.Thread(target=self._play_wav, args=(sound_file,), daemon=True).start()
 
     def _play_wav(self, sound_file: str):
-        """Play WAV file using winsound (runs in thread)"""
-        if WINSOUND_AVAILABLE:
-            try:
+        """Play WAV file using winsound (Windows) or afplay (macOS)"""
+        try:
+            if WINSOUND_AVAILABLE:
                 winsound.PlaySound(sound_file, winsound.SND_FILENAME | winsound.SND_ASYNC)
-            except Exception as e:
-                print(f"Sound error: {e}")
+            elif platform.system() == "Darwin":
+                # macOS: use afplay command
+                import subprocess
+                subprocess.Popen(["afplay", sound_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                print("Audio not supported on this platform")
+        except Exception as e:
+            print(f"Sound error: {e}")
 
     def _play_beep(self, is_spawn: bool):
         """Play beep sound as fallback"""
-        if WINSOUND_AVAILABLE:
-            try:
+        try:
+            if WINSOUND_AVAILABLE:
                 if is_spawn:
                     for _ in range(3):
                         winsound.Beep(1000, 200)
@@ -874,8 +880,14 @@ del "%~f0"
                 else:
                     winsound.Beep(800, 300)
                     winsound.Beep(1000, 300)
-            except Exception as e:
-                print(f"Beep error: {e}")
+            elif platform.system() == "Darwin":
+                # macOS: use system beep via osascript
+                import subprocess
+                beep_count = 3 if is_spawn else 1
+                for _ in range(beep_count):
+                    subprocess.run(["osascript", "-e", "beep"], check=False)
+        except Exception as e:
+            print(f"Beep error: {e}")
 
     def filter_bosses(self, filter_type: str):
         """Filter bosses by type"""

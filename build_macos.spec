@@ -9,10 +9,9 @@ a = Analysis(
     binaries=[],
     datas=[
         ('.env', '.'),
+        ('sound', 'sound'),
     ],
     hiddenimports=[
-        'pyttsx3.drivers',
-        'pyttsx3.drivers.nsss',  # macOS TTS driver
         'supabase',
         'postgrest',
         'realtime',
@@ -76,8 +75,8 @@ app = BUNDLE(
     info_plist={
         'CFBundleName': 'L2M Boss Timer',
         'CFBundleDisplayName': 'L2M Boss Timer',
-        'CFBundleVersion': '2.0.0',
-        'CFBundleShortVersionString': '2.0.0',
+        'CFBundleVersion': '2.1.0',
+        'CFBundleShortVersionString': '2.1.0',
         'NSHighResolutionCapable': True,
     },
 )

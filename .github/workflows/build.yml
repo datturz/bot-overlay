@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyqt5 pyttsx3 supabase python-dotenv pyinstaller
+          pip install pyqt5 supabase python-dotenv pyinstaller requests
 
       - name: Create .env file
         run: |
@@ -53,7 +53,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyqt5 pyttsx3 supabase python-dotenv pyinstaller
+          pip install pyqt5 supabase python-dotenv pyinstaller requests
 
       - name: Create .env file
         run: |
