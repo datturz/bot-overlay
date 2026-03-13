@@ -7,6 +7,7 @@ Read-only mode with auto-refresh every 10 seconds
 
 import sys
 import threading
+import platform
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Set
 from PyQt5.QtWidgets import (
@@ -15,6 +16,15 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QTimer, QPoint
 from PyQt5.QtGui import QColor, QPalette
+
+# Try to import winsound for Windows beep (more reliable in background)
+WINSOUND_AVAILABLE = False
+if platform.system() == "Windows":
+    try:
+        import winsound
+        WINSOUND_AVAILABLE = True
+    except ImportError:
+        pass
 
 try:
     import pyttsx3
@@ -580,10 +590,26 @@ class MainWindow(QMainWindow):
                 self.announced_bosses[boss_id].add(1)
                 self.announce_boss(boss_name, 1)
 
-    def queue_announcement(self, text: str):
+    def play_alert_beep(self, is_spawn: bool = False):
+        """Play alert beep sound (works even when app is in background)"""
+        if WINSOUND_AVAILABLE:
+            try:
+                if is_spawn:
+                    # Triple beep for spawn alert
+                    for _ in range(3):
+                        winsound.Beep(1000, 200)  # 1000Hz for 200ms
+                        winsound.Beep(1500, 200)  # 1500Hz for 200ms
+                else:
+                    # Double beep for warning
+                    winsound.Beep(800, 300)   # 800Hz for 300ms
+                    winsound.Beep(1000, 300)  # 1000Hz for 300ms
+            except Exception as e:
+                print(f"Beep error: {e}")
+
+    def queue_announcement(self, text: str, is_spawn: bool = False):
         """Add announcement to queue and start processing if not already running"""
         with self.tts_lock:
-            self.tts_queue.append(text)
+            self.tts_queue.append((text, is_spawn))
             if not self.tts_thread_running:
                 self.tts_thread_running = True
                 thread = threading.Thread(target=self.process_tts_queue, daemon=True)
@@ -596,11 +622,16 @@ class MainWindow(QMainWindow):
                 if not self.tts_queue:
                     self.tts_thread_running = False
                     return
-                text = self.tts_queue.pop(0)
+                text, is_spawn = self.tts_queue.pop(0)
 
             try:
-                self.tts_engine.say(text)
-                self.tts_engine.runAndWait()
+                # Play beep first (works in background)
+                self.play_alert_beep(is_spawn)
+
+                # Then play TTS
+                if self.tts_engine:
+                    self.tts_engine.say(text)
+                    self.tts_engine.runAndWait()
             except Exception as e:
                 print(f"TTS error: {e}")
 
@@ -610,12 +641,12 @@ class MainWindow(QMainWindow):
             text = f"{boss_name} will respawn in 1 minute!"
         else:
             text = f"{boss_name} will respawn in {minutes} minutes!"
-        self.queue_announcement(text)
+        self.queue_announcement(text, is_spawn=False)
 
     def announce_boss_spawned(self, boss_name: str):
         """Announce boss has spawned via TTS"""
         text = f"{boss_name} already respawn, lets go!"
-        self.queue_announcement(text)
+        self.queue_announcement(text, is_spawn=True)
 
     def filter_bosses(self, filter_type: str):
         """Filter bosses by type"""
