@@ -8,10 +8,9 @@ a = Analysis(
     binaries=[],
     datas=[
         ('.env', '.'),
+        ('sound', 'sound'),
     ],
     hiddenimports=[
-        'pyttsx3.drivers',
-        'pyttsx3.drivers.sapi5',
         'supabase',
         'postgrest',
         'realtime',

@@ -98,8 +98,8 @@ class Database:
         if spawn_time <= now:
             time_since_spawn = (now - spawn_time).total_seconds()
 
-            # If within 1 minute of spawn, keep showing SPAWN!
-            if allow_spawn_display and time_since_spawn <= 60:
+            # If within 3 minutes of spawn, keep showing SPAWN!
+            if allow_spawn_display and time_since_spawn <= 180:
                 return spawn_time  # Will result in negative countdown = SPAWN!
 
             # Otherwise, calculate next cycle
@@ -117,6 +117,15 @@ class Database:
         now = datetime.now(GMT_PLUS_7)
         diff = spawn_time - now
         return int(diff.total_seconds())
+
+    def validate_pin(self, pin: str) -> bool:
+        """Validate PIN against pin_validation table in Supabase"""
+        try:
+            result = self.client.table("pin_validation").select("pin").eq("pin", pin).execute()
+            return len(result.data) > 0
+        except Exception as e:
+            print(f"PIN validation error: {e}")
+            return False
 
 
 # Global database instance

@@ -2,22 +2,24 @@
 """
 Lineage2M Boss Timer v2 - Desktop Application with Resizable Overlay
 Uses existing database schema: kill_time + interval
-Read-only mode with auto-refresh every 10 seconds
+Read-only mode with auto-refresh every 1 minute
 """
 
 import sys
+import os
 import threading
 import platform
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Set
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QFrame, QScrollArea, QSizeGrip, QMessageBox
+    QLabel, QPushButton, QFrame, QScrollArea, QSizeGrip, QMessageBox,
+    QDialog, QLineEdit, QDialogButtonBox
 )
 from PyQt5.QtCore import Qt, QTimer, QPoint
 from PyQt5.QtGui import QColor, QPalette
 
-# Try to import winsound for Windows beep (more reliable in background)
+# Try to import winsound for Windows audio (reliable in background)
 WINSOUND_AVAILABLE = False
 if platform.system() == "Windows":
     try:
@@ -26,13 +28,6 @@ if platform.system() == "Windows":
     except ImportError:
         pass
 
-try:
-    import pyttsx3
-    TTS_AVAILABLE = True
-except ImportError:
-    TTS_AVAILABLE = False
-    print("Warning: pyttsx3 not installed. Sound notifications disabled.")
-
 from config import (
     APP_TITLE, APP_VERSION, WARNING_MINUTES_YELLOW, WARNING_MINUTES_RED,
     OVERLAY_OPACITY, WINDOW_WIDTH, WINDOW_HEIGHT, OVERLAY_MIN_WIDTH, OVERLAY_MIN_HEIGHT,
@@ -40,12 +35,89 @@ from config import (
 )
 from database import db
 
+# Constants
+SPAWN_DISPLAY_SECONDS = 180  # 3 minutes before moving to bottom
+POLLING_INTERVAL_MS = 60000  # 1 minute polling interval
+
+
+def get_resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
+
 
 # Boss type colors
 TYPE_COLORS = {
     "ours": "#00ff00",      # Green
     "invasion": "#ff6600",  # Orange
 }
+
+
+class PinDialog(QDialog):
+    """PIN validation dialog"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("PIN Validation")
+        self.setFixedSize(300, 150)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #1a1a2e;
+            }
+            QLabel {
+                color: #e8e8e8;
+                font-size: 14px;
+            }
+            QLineEdit {
+                background-color: #16213e;
+                color: #e8e8e8;
+                border: 1px solid #0f3460;
+                border-radius: 5px;
+                padding: 8px;
+                font-size: 16px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #e94560;
+            }
+            QPushButton {
+                background-color: #e94560;
+                color: #fff;
+                border: none;
+                border-radius: 5px;
+                padding: 8px 20px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #ff6b6b;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Label
+        label = QLabel("Enter PIN to access:")
+        label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(label)
+
+        # PIN input
+        self.pin_input = QLineEdit()
+        self.pin_input.setEchoMode(QLineEdit.Password)
+        self.pin_input.setPlaceholderText("Enter PIN")
+        self.pin_input.setAlignment(Qt.AlignCenter)
+        self.pin_input.returnPressed.connect(self.accept)
+        layout.addWidget(self.pin_input)
+
+        # Submit button
+        submit_btn = QPushButton("Submit")
+        submit_btn.clicked.connect(self.accept)
+        layout.addWidget(submit_btn)
+
+    def get_pin(self) -> str:
+        return self.pin_input.text()
 
 
 class BossTimerWidget(QFrame):
@@ -204,22 +276,20 @@ class MainWindow(QMainWindow):
 
         # Sound notification tracking
         self.announced_bosses: Dict[int, Set[int]] = {}
-        self.tts_engine = None
-        self.tts_queue: List[str] = []  # Queue for TTS messages
-        self.tts_lock = threading.Lock()
-        self.tts_thread_running = False
+        self.sound_queue: List[tuple] = []  # Queue for sound messages
+        self.sound_lock = threading.Lock()
+        self.sound_thread_running = False
         self.sound_enabled = True
-        self.volume = 1.0  # Volume 0.0 - 1.0
 
-        # Initialize TTS engine
-        if TTS_AVAILABLE:
-            try:
-                self.tts_engine = pyttsx3.init()
-                self.tts_engine.setProperty('rate', 150)
-                self.tts_engine.setProperty('volume', self.volume)
-            except Exception as e:
-                print(f"Failed to initialize TTS: {e}")
-                self.tts_engine = None
+        # Sound file paths
+        self.sound_files = {
+            "ours_5min": get_resource_path("sound/boss_5min.wav"),
+            "ours_1min": get_resource_path("sound/boss_1min.wav"),
+            "ours_spawn": get_resource_path("sound/boss_spawn.wav"),
+            "invasion_5min": get_resource_path("sound/invasion_5min.wav"),
+            "invasion_1min": get_resource_path("sound/invasion_1min.wav"),
+            "invasion_spawn": get_resource_path("sound/invasion_spawn.wav"),
+        }
 
         self.setup_ui()
         self.setup_timer()
@@ -312,51 +382,6 @@ class MainWindow(QMainWindow):
         self.time_label = QLabel("")
         self.time_label.setStyleSheet("color: #00ffff; font-size: 11px;")
         layout.addWidget(self.time_label)
-
-        # Volume down button
-        vol_down_btn = QPushButton("-")
-        vol_down_btn.setFixedSize(20, 22)
-        vol_down_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #0f3460;
-                color: #fff;
-                border: none;
-                border-radius: 3px;
-                font-size: 12px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #16213e;
-            }
-        """)
-        vol_down_btn.clicked.connect(self.volume_down)
-        layout.addWidget(vol_down_btn)
-
-        # Volume label
-        self.vol_label = QLabel("100%")
-        self.vol_label.setFixedWidth(35)
-        self.vol_label.setAlignment(Qt.AlignCenter)
-        self.vol_label.setStyleSheet("color: #aaa; font-size: 9px;")
-        layout.addWidget(self.vol_label)
-
-        # Volume up button
-        vol_up_btn = QPushButton("+")
-        vol_up_btn.setFixedSize(20, 22)
-        vol_up_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #0f3460;
-                color: #fff;
-                border: none;
-                border-radius: 3px;
-                font-size: 12px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #16213e;
-            }
-        """)
-        vol_up_btn.clicked.connect(self.volume_up)
-        layout.addWidget(vol_up_btn)
 
         # Sound toggle button
         self.sound_btn = QPushButton("Sound")
@@ -490,10 +515,10 @@ class MainWindow(QMainWindow):
         self.update_timer_obj.timeout.connect(self.update_all_timers)
         self.update_timer_obj.start(1000)
 
-        # Auto-refresh from database every 10 seconds
+        # Auto-refresh from database every 1 minute
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self.refresh_bosses)
-        self.refresh_timer.start(10000)
+        self.refresh_timer.start(POLLING_INTERVAL_MS)
 
     def refresh_bosses(self):
         """Refresh boss list from database"""
@@ -521,11 +546,11 @@ class MainWindow(QMainWindow):
             if not kill_time:
                 return float('inf')
             countdown = db.calculate_countdown_seconds(kill_time, interval)
-            # If just spawned (within 1 minute, countdown between -60 and 0), keep at top
-            if -60 <= countdown <= 0:
+            # If just spawned (within 3 minutes), keep at top
+            if -SPAWN_DISPLAY_SECONDS <= countdown <= 0:
                 return countdown  # Just spawned stays at top (negative values first)
-            # If spawned more than 1 min ago (countdown < -60), put at bottom
-            if countdown < -60:
+            # If spawned more than 3 min ago, put at bottom
+            if countdown < -SPAWN_DISPLAY_SECONDS:
                 return float('inf')
             return countdown  # Upcoming spawns sorted by nearest first
 
@@ -552,7 +577,7 @@ class MainWindow(QMainWindow):
             widget.update_timer()
 
         # Check for sound notifications
-        if self.sound_enabled and self.tts_engine:
+        if self.sound_enabled:
             self.check_boss_notifications()
 
     def check_boss_notifications(self):
@@ -561,6 +586,7 @@ class MainWindow(QMainWindow):
             boss = widget.boss_data
             boss_id = boss.get("id")
             boss_name = boss.get("name", "Unknown")
+            boss_type = boss.get("type", "ours")
             kill_time = boss.get("kill_time")
             interval = boss.get("interval", 8)
 
@@ -578,75 +604,53 @@ class MainWindow(QMainWindow):
             if total_seconds <= 0:
                 if 0 not in self.announced_bosses[boss_id]:
                     self.announced_bosses[boss_id].add(0)
-                    self.announce_boss_spawned(boss_name)
+                    self.play_sound(boss_type, "spawn")
                 continue
 
             # Announce at 5 minutes (between 4:01 and 5:00)
             if 240 < total_seconds <= 300 and 5 not in self.announced_bosses[boss_id]:
                 self.announced_bosses[boss_id].add(5)
-                self.announce_boss(boss_name, 5)
+                self.play_sound(boss_type, "5min")
             # Announce at 1 minute (between 0:01 and 1:00)
             elif 0 < total_seconds <= 60 and 1 not in self.announced_bosses[boss_id]:
                 self.announced_bosses[boss_id].add(1)
-                self.announce_boss(boss_name, 1)
+                self.play_sound(boss_type, "1min")
 
-    def play_alert_beep(self, is_spawn: bool = False):
-        """Play alert beep sound (works even when app is in background)"""
+    def play_sound(self, boss_type: str, alert_type: str):
+        """Play sound file in background thread"""
+        sound_key = f"{boss_type}_{alert_type}"
+        sound_file = self.sound_files.get(sound_key)
+
+        if not sound_file or not os.path.exists(sound_file):
+            # Fallback to beep
+            if WINSOUND_AVAILABLE:
+                threading.Thread(target=self._play_beep, args=(alert_type == "spawn",), daemon=True).start()
+            return
+
+        # Play WAV file in background thread
+        threading.Thread(target=self._play_wav, args=(sound_file,), daemon=True).start()
+
+    def _play_wav(self, sound_file: str):
+        """Play WAV file using winsound (runs in thread)"""
+        if WINSOUND_AVAILABLE:
+            try:
+                winsound.PlaySound(sound_file, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            except Exception as e:
+                print(f"Sound error: {e}")
+
+    def _play_beep(self, is_spawn: bool):
+        """Play beep sound as fallback"""
         if WINSOUND_AVAILABLE:
             try:
                 if is_spawn:
-                    # Triple beep for spawn alert
                     for _ in range(3):
-                        winsound.Beep(1000, 200)  # 1000Hz for 200ms
-                        winsound.Beep(1500, 200)  # 1500Hz for 200ms
+                        winsound.Beep(1000, 200)
+                        winsound.Beep(1500, 200)
                 else:
-                    # Double beep for warning
-                    winsound.Beep(800, 300)   # 800Hz for 300ms
-                    winsound.Beep(1000, 300)  # 1000Hz for 300ms
+                    winsound.Beep(800, 300)
+                    winsound.Beep(1000, 300)
             except Exception as e:
                 print(f"Beep error: {e}")
-
-    def queue_announcement(self, text: str, is_spawn: bool = False):
-        """Add announcement to queue and start processing if not already running"""
-        with self.tts_lock:
-            self.tts_queue.append((text, is_spawn))
-            if not self.tts_thread_running:
-                self.tts_thread_running = True
-                thread = threading.Thread(target=self.process_tts_queue, daemon=True)
-                thread.start()
-
-    def process_tts_queue(self):
-        """Process all queued announcements sequentially"""
-        while True:
-            with self.tts_lock:
-                if not self.tts_queue:
-                    self.tts_thread_running = False
-                    return
-                text, is_spawn = self.tts_queue.pop(0)
-
-            try:
-                # Play beep first (works in background)
-                self.play_alert_beep(is_spawn)
-
-                # Then play TTS
-                if self.tts_engine:
-                    self.tts_engine.say(text)
-                    self.tts_engine.runAndWait()
-            except Exception as e:
-                print(f"TTS error: {e}")
-
-    def announce_boss(self, boss_name: str, minutes: int):
-        """Announce boss respawn via TTS"""
-        if minutes == 1:
-            text = f"{boss_name} will respawn in 1 minute!"
-        else:
-            text = f"{boss_name} will respawn in {minutes} minutes!"
-        self.queue_announcement(text, is_spawn=False)
-
-    def announce_boss_spawned(self, boss_name: str):
-        """Announce boss has spawned via TTS"""
-        text = f"{boss_name} already respawn, lets go!"
-        self.queue_announcement(text, is_spawn=True)
 
     def filter_bosses(self, filter_type: str):
         """Filter bosses by type"""
@@ -654,22 +658,6 @@ class MainWindow(QMainWindow):
         for f_type, btn in self.filter_buttons.items():
             btn.setChecked(f_type == filter_type)
         self.refresh_bosses()
-
-    def volume_up(self):
-        """Increase volume by 10%"""
-        self.volume = min(1.0, self.volume + 0.1)
-        self.update_volume()
-
-    def volume_down(self):
-        """Decrease volume by 10%"""
-        self.volume = max(0.0, self.volume - 0.1)
-        self.update_volume()
-
-    def update_volume(self):
-        """Update TTS volume and label"""
-        if self.tts_engine:
-            self.tts_engine.setProperty('volume', self.volume)
-        self.vol_label.setText(f"{int(self.volume * 100)}%")
 
     def toggle_sound(self):
         """Toggle sound notifications on/off"""
@@ -754,6 +742,41 @@ class MainWindow(QMainWindow):
         event.accept()
 
 
+def validate_pin(app) -> bool:
+    """Show PIN dialog and validate against Supabase"""
+    max_attempts = 3
+
+    for attempt in range(max_attempts):
+        dialog = PinDialog()
+        if dialog.exec_() != QDialog.Accepted:
+            return False
+
+        pin = dialog.get_pin()
+        if not pin:
+            QMessageBox.warning(None, "Error", "Please enter a PIN")
+            continue
+
+        # Validate PIN against Supabase
+        if db.validate_pin(pin):
+            return True
+        else:
+            remaining = max_attempts - attempt - 1
+            if remaining > 0:
+                QMessageBox.warning(
+                    None,
+                    "Invalid PIN",
+                    f"Invalid PIN. {remaining} attempts remaining."
+                )
+            else:
+                QMessageBox.critical(
+                    None,
+                    "Access Denied",
+                    "Too many invalid attempts. Application will close."
+                )
+
+    return False
+
+
 def main():
     # Create application
     app = QApplication(sys.argv)
@@ -788,7 +811,11 @@ def main():
 
     print("Connected to Supabase!")
 
-    # Create and show main window (no login required - read only)
+    # Validate PIN
+    if not validate_pin(app):
+        sys.exit(0)
+
+    # Create and show main window
     window = MainWindow()
     window.show()
 
