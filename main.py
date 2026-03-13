@@ -9,15 +9,20 @@ import sys
 import os
 import threading
 import platform
+import subprocess
+import tempfile
+import shutil
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Set
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QFrame, QScrollArea, QSizeGrip, QMessageBox,
-    QDialog, QLineEdit, QDialogButtonBox
+    QDialog, QLineEdit, QDialogButtonBox, QProgressDialog
 )
-from PyQt5.QtCore import Qt, QTimer, QPoint
+from PyQt5.QtCore import Qt, QTimer, QPoint, QThread, pyqtSignal
 from PyQt5.QtGui import QColor, QPalette
+
+import requests
 
 # Try to import winsound for Windows audio (reliable in background)
 WINSOUND_AVAILABLE = False
@@ -39,6 +44,88 @@ from database import db
 SPAWN_DISPLAY_SECONDS = 180  # 3 minutes before moving to bottom
 POLLING_INTERVAL_MS = 60000  # 1 minute polling interval
 PIN_CHECK_INTERVAL_MS = 300000  # 5 minutes PIN validation interval
+UPDATE_CHECK_INTERVAL_MS = 600000  # 10 minutes update check interval
+
+# GitHub repository for updates
+GITHUB_REPO = "datturz/bot-overlay"
+GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+
+
+class UpdateChecker(QThread):
+    """Background thread to check for updates"""
+    update_available = pyqtSignal(str, str)  # version, download_url
+    no_update = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def __init__(self, current_version: str):
+        super().__init__()
+        self.current_version = current_version
+
+    def run(self):
+        try:
+            response = requests.get(GITHUB_API_URL, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                latest_version = data.get("tag_name", "").lstrip("v")
+
+                # Find Windows executable in assets
+                download_url = None
+                for asset in data.get("assets", []):
+                    if asset.get("name", "").endswith(".exe"):
+                        download_url = asset.get("browser_download_url")
+                        break
+
+                if latest_version and self._is_newer(latest_version):
+                    self.update_available.emit(latest_version, download_url or "")
+                else:
+                    self.no_update.emit()
+            else:
+                self.error.emit(f"HTTP {response.status_code}")
+        except Exception as e:
+            self.error.emit(str(e))
+
+    def _is_newer(self, latest: str) -> bool:
+        """Compare versions (e.g., 2.0.0 vs 2.1.0)"""
+        try:
+            current_parts = [int(x) for x in self.current_version.split(".")]
+            latest_parts = [int(x) for x in latest.split(".")]
+            return latest_parts > current_parts
+        except:
+            return False
+
+
+class UpdateDownloader(QThread):
+    """Background thread to download update"""
+    progress = pyqtSignal(int)  # percentage
+    finished = pyqtSignal(str)  # downloaded file path
+    error = pyqtSignal(str)
+
+    def __init__(self, download_url: str):
+        super().__init__()
+        self.download_url = download_url
+
+    def run(self):
+        try:
+            # Download to temp file
+            response = requests.get(self.download_url, stream=True, timeout=60)
+            total_size = int(response.headers.get('content-length', 0))
+
+            temp_dir = tempfile.gettempdir()
+            temp_file = os.path.join(temp_dir, "L2M_BossTimer_update.exe")
+
+            downloaded = 0
+            with open(temp_file, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            percent = int((downloaded / total_size) * 100)
+                            self.progress.emit(percent)
+
+            self.finished.emit(temp_file)
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 def get_resource_path(relative_path):
@@ -293,9 +380,16 @@ class MainWindow(QMainWindow):
             "invasion_spawn": get_resource_path("sound/invasion_spawn.wav"),
         }
 
+        # Update tracking
+        self.latest_version = None
+        self.download_url = None
+        self.update_checker = None
+        self.update_downloader = None
+
         self.setup_ui()
         self.setup_timer()
         self.refresh_bosses()
+        self.check_for_updates()  # Check on startup
 
     def setup_ui(self):
         self.setWindowTitle(f"{APP_TITLE} v{APP_VERSION}")
@@ -384,6 +478,26 @@ class MainWindow(QMainWindow):
         self.time_label = QLabel("")
         self.time_label.setStyleSheet("color: #00ffff; font-size: 11px;")
         layout.addWidget(self.time_label)
+
+        # Update button (hidden by default)
+        self.update_btn = QPushButton("Update!")
+        self.update_btn.setFixedSize(55, 22)
+        self.update_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ff6600;
+                color: #fff;
+                border: none;
+                border-radius: 3px;
+                font-size: 9px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #ff8833;
+            }
+        """)
+        self.update_btn.clicked.connect(self.do_update)
+        self.update_btn.hide()  # Hidden until update available
+        layout.addWidget(self.update_btn)
 
         # Sound toggle button
         self.sound_btn = QPushButton("Sound")
@@ -527,6 +641,11 @@ class MainWindow(QMainWindow):
         self.pin_check_timer.timeout.connect(self.validate_pin_periodic)
         self.pin_check_timer.start(PIN_CHECK_INTERVAL_MS)
 
+        # Update check every 10 minutes
+        self.update_check_timer = QTimer(self)
+        self.update_check_timer.timeout.connect(self.check_for_updates)
+        self.update_check_timer.start(UPDATE_CHECK_INTERVAL_MS)
+
     def validate_pin_periodic(self):
         """Validate PIN periodically - kick user if PIN is no longer valid"""
         if not db.validate_pin(self.user_pin):
@@ -540,6 +659,91 @@ class MainWindow(QMainWindow):
             )
             self.close()
             QApplication.quit()
+
+    def check_for_updates(self):
+        """Check GitHub for new version"""
+        from config import APP_VERSION
+        self.update_checker = UpdateChecker(APP_VERSION)
+        self.update_checker.update_available.connect(self.on_update_available)
+        self.update_checker.start()
+
+    def on_update_available(self, version: str, download_url: str):
+        """Called when new version is found"""
+        self.latest_version = version
+        self.download_url = download_url
+        self.update_btn.setText(f"v{version}")
+        self.update_btn.setToolTip(f"Update available: v{version}\nClick to download and install")
+        self.update_btn.show()
+
+    def do_update(self):
+        """Download and install update"""
+        if not self.download_url:
+            QMessageBox.warning(self, "Update Error", "No download URL available")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Update Available",
+            f"Download and install v{self.latest_version}?\n\nThe application will restart after update.",
+            QMessageBox.Yes | QMessageBox.No
+        )
+
+        if reply != QMessageBox.Yes:
+            return
+
+        # Show progress dialog
+        self.progress_dialog = QProgressDialog("Downloading update...", "Cancel", 0, 100, self)
+        self.progress_dialog.setWindowTitle("Updating")
+        self.progress_dialog.setWindowModality(Qt.WindowModal)
+        self.progress_dialog.setAutoClose(False)
+        self.progress_dialog.show()
+
+        # Start download
+        self.update_downloader = UpdateDownloader(self.download_url)
+        self.update_downloader.progress.connect(self.on_download_progress)
+        self.update_downloader.finished.connect(self.on_download_finished)
+        self.update_downloader.error.connect(self.on_download_error)
+        self.update_downloader.start()
+
+    def on_download_progress(self, percent: int):
+        """Update progress bar"""
+        self.progress_dialog.setValue(percent)
+
+    def on_download_finished(self, temp_file: str):
+        """Download complete - install update"""
+        self.progress_dialog.close()
+
+        try:
+            # Get current executable path
+            if getattr(sys, 'frozen', False):
+                current_exe = sys.executable
+            else:
+                QMessageBox.information(self, "Update", "Update downloaded. Please restart in production mode.")
+                return
+
+            # Create batch script to replace exe and restart
+            batch_content = f'''@echo off
+timeout /t 2 /nobreak > nul
+copy /y "{temp_file}" "{current_exe}"
+del "{temp_file}"
+start "" "{current_exe}"
+del "%~f0"
+'''
+            batch_file = os.path.join(tempfile.gettempdir(), "update_l2m.bat")
+            with open(batch_file, 'w') as f:
+                f.write(batch_content)
+
+            # Run batch and exit
+            subprocess.Popen(['cmd', '/c', batch_file], shell=True)
+            QApplication.quit()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Update Error", f"Failed to install update:\n{e}")
+
+    def on_download_error(self, error: str):
+        """Download failed"""
+        self.progress_dialog.close()
+        QMessageBox.critical(self, "Download Error", f"Failed to download update:\n{error}")
 
     def refresh_bosses(self):
         """Refresh boss list from database"""
@@ -761,6 +965,7 @@ class MainWindow(QMainWindow):
         self.update_timer_obj.stop()
         self.refresh_timer.stop()
         self.pin_check_timer.stop()
+        self.update_check_timer.stop()
         event.accept()
 
 

@@ -1,5 +1,5 @@
 PyQt5>=5.15.0
-pyttsx3>=2.90
 supabase>=2.0.0
 python-dotenv>=1.0.0
+requests>=2.28.0
 pyinstaller>=6.0.0
