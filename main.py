@@ -38,6 +38,7 @@ from database import db
 # Constants
 SPAWN_DISPLAY_SECONDS = 180  # 3 minutes before moving to bottom
 POLLING_INTERVAL_MS = 60000  # 1 minute polling interval
+PIN_CHECK_INTERVAL_MS = 300000  # 5 minutes PIN validation interval
 
 
 def get_resource_path(relative_path):
@@ -266,13 +267,14 @@ class BossTimerWidget(QFrame):
 class MainWindow(QMainWindow):
     """Main application window with resizable overlay"""
 
-    def __init__(self):
+    def __init__(self, user_pin: str):
         super().__init__()
         self.overlay_mode = False
         self.boss_widgets: List[BossTimerWidget] = []
         self.dragging = False
         self.drag_position = QPoint()
         self.current_filter = "all"
+        self.user_pin = user_pin  # Store PIN for periodic validation
 
         # Sound notification tracking
         self.announced_bosses: Dict[int, Set[int]] = {}
@@ -520,6 +522,25 @@ class MainWindow(QMainWindow):
         self.refresh_timer.timeout.connect(self.refresh_bosses)
         self.refresh_timer.start(POLLING_INTERVAL_MS)
 
+        # PIN validation every 5 minutes
+        self.pin_check_timer = QTimer(self)
+        self.pin_check_timer.timeout.connect(self.validate_pin_periodic)
+        self.pin_check_timer.start(PIN_CHECK_INTERVAL_MS)
+
+    def validate_pin_periodic(self):
+        """Validate PIN periodically - kick user if PIN is no longer valid"""
+        if not db.validate_pin(self.user_pin):
+            self.update_timer_obj.stop()
+            self.refresh_timer.stop()
+            self.pin_check_timer.stop()
+            QMessageBox.critical(
+                self,
+                "Session Expired",
+                "Your PIN is no longer valid.\nThe application will now close."
+            )
+            self.close()
+            QApplication.quit()
+
     def refresh_bosses(self):
         """Refresh boss list from database"""
         # Clear existing widgets
@@ -739,17 +760,18 @@ class MainWindow(QMainWindow):
         """Handle window close"""
         self.update_timer_obj.stop()
         self.refresh_timer.stop()
+        self.pin_check_timer.stop()
         event.accept()
 
 
-def validate_pin(app) -> bool:
-    """Show PIN dialog and validate against Supabase"""
+def validate_pin(app) -> Optional[str]:
+    """Show PIN dialog and validate against Supabase. Returns PIN if valid, None otherwise."""
     max_attempts = 3
 
     for attempt in range(max_attempts):
         dialog = PinDialog()
         if dialog.exec_() != QDialog.Accepted:
-            return False
+            return None
 
         pin = dialog.get_pin()
         if not pin:
@@ -758,7 +780,7 @@ def validate_pin(app) -> bool:
 
         # Validate PIN against Supabase
         if db.validate_pin(pin):
-            return True
+            return pin  # Return the valid PIN
         else:
             remaining = max_attempts - attempt - 1
             if remaining > 0:
@@ -774,7 +796,7 @@ def validate_pin(app) -> bool:
                     "Too many invalid attempts. Application will close."
                 )
 
-    return False
+    return None
 
 
 def main():
@@ -812,11 +834,12 @@ def main():
     print("Connected to Supabase!")
 
     # Validate PIN
-    if not validate_pin(app):
+    user_pin = validate_pin(app)
+    if not user_pin:
         sys.exit(0)
 
-    # Create and show main window
-    window = MainWindow()
+    # Create and show main window with PIN for periodic validation
+    window = MainWindow(user_pin)
     window.show()
 
     sys.exit(app.exec_())
