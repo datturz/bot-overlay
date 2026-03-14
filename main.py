@@ -17,7 +17,7 @@ from typing import Optional, Dict, List, Set
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QFrame, QScrollArea, QSizeGrip, QMessageBox,
-    QDialog, QLineEdit, QDialogButtonBox, QProgressDialog
+    QDialog, QLineEdit, QDialogButtonBox, QProgressDialog, QSlider
 )
 from PyQt5.QtCore import Qt, QTimer, QPoint, QThread, pyqtSignal
 from PyQt5.QtGui import QColor, QPalette
@@ -369,6 +369,7 @@ class MainWindow(QMainWindow):
         self.sound_lock = threading.Lock()
         self.sound_thread_running = False
         self.sound_enabled = True
+        self.sound_volume = 100  # Volume 0-100
 
         # Sound file paths
         self.sound_files = {
@@ -517,6 +518,38 @@ class MainWindow(QMainWindow):
         """)
         self.sound_btn.clicked.connect(self.toggle_sound)
         layout.addWidget(self.sound_btn)
+
+        # Volume slider
+        self.volume_slider = QSlider(Qt.Horizontal)
+        self.volume_slider.setFixedSize(60, 20)
+        self.volume_slider.setMinimum(0)
+        self.volume_slider.setMaximum(100)
+        self.volume_slider.setValue(100)
+        self.volume_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                background: #0f3460;
+                height: 6px;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background: #e94560;
+                width: 12px;
+                margin: -3px 0;
+                border-radius: 6px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #00aa00;
+                border-radius: 3px;
+            }
+        """)
+        self.volume_slider.valueChanged.connect(self.set_volume)
+        layout.addWidget(self.volume_slider)
+
+        # Volume label
+        self.volume_label = QLabel("100%")
+        self.volume_label.setFixedWidth(30)
+        self.volume_label.setStyleSheet("color: #aaa; font-size: 9px;")
+        layout.addWidget(self.volume_label)
 
         # Overlay toggle button
         self.overlay_btn = QPushButton("Overlay")
@@ -931,6 +964,39 @@ del "%~f0"
                 }
             """)
             self.announced_bosses.clear()
+
+    def set_volume(self, value: int):
+        """Set sound volume (0-100)"""
+        self.sound_volume = value
+        self.volume_label.setText(f"{value}%")
+
+        # Mute if volume is 0
+        if value == 0 and self.sound_enabled:
+            self.sound_enabled = False
+            self.sound_btn.setText("Mute")
+            self.sound_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #aa0000;
+                    color: #fff;
+                    border: none;
+                    border-radius: 3px;
+                    font-size: 9px;
+                    font-weight: bold;
+                }
+            """)
+        elif value > 0 and not self.sound_enabled:
+            self.sound_enabled = True
+            self.sound_btn.setText("Sound")
+            self.sound_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #00aa00;
+                    color: #fff;
+                    border: none;
+                    border-radius: 3px;
+                    font-size: 9px;
+                    font-weight: bold;
+                }
+            """)
 
     def toggle_overlay_mode(self):
         """Toggle between normal window and overlay mode"""

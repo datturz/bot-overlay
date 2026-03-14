@@ -75,8 +75,8 @@ app = BUNDLE(
     info_plist={
         'CFBundleName': 'L2M Boss Timer',
         'CFBundleDisplayName': 'L2M Boss Timer',
-        'CFBundleVersion': '2.1.0',
-        'CFBundleShortVersionString': '2.1.0',
+        'CFBundleVersion': '2.2.0',
+        'CFBundleShortVersionString': '2.2.0',
         'NSHighResolutionCapable': True,
     },
 )
