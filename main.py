@@ -115,22 +115,32 @@ class UpdateDownloader(QThread):
 
     def run(self):
         try:
-            # Download to temp file
-            response = requests.get(self.download_url, stream=True, timeout=60)
+            # Download to temp file with longer timeout
+            response = requests.get(self.download_url, stream=True, timeout=300)
+            response.raise_for_status()
+
             total_size = int(response.headers.get('content-length', 0))
+            if total_size == 0:
+                self.error.emit("Could not determine file size")
+                return
 
             temp_dir = tempfile.gettempdir()
             temp_file = os.path.join(temp_dir, "L2M_BossTimer_update.exe")
 
             downloaded = 0
             with open(temp_file, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
+                for chunk in response.iter_content(chunk_size=65536):  # Larger chunks
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
-                        if total_size > 0:
-                            percent = int((downloaded / total_size) * 100)
-                            self.progress.emit(percent)
+                        percent = int((downloaded / total_size) * 100)
+                        self.progress.emit(percent)
+
+            # Verify download completed
+            actual_size = os.path.getsize(temp_file)
+            if actual_size != total_size:
+                self.error.emit(f"Download incomplete: {actual_size}/{total_size} bytes")
+                return
 
             self.finished.emit(temp_file)
         except Exception as e:
@@ -787,9 +797,17 @@ class MainWindow(QMainWindow):
 
             # Create batch script to replace exe and restart
             batch_content = f'''@echo off
-timeout /t 2 /nobreak > nul
+echo Waiting for application to close...
+timeout /t 3 /nobreak > nul
+echo Copying update...
 copy /y "{temp_file}" "{current_exe}"
-del "{temp_file}"
+if errorlevel 1 (
+    echo Copy failed, retrying...
+    timeout /t 2 /nobreak > nul
+    copy /y "{temp_file}" "{current_exe}"
+)
+del "{temp_file}" 2>nul
+echo Starting updated application...
 start "" "{current_exe}"
 del "%~f0"
 '''
