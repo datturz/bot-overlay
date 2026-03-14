@@ -63,25 +63,34 @@ class UpdateChecker(QThread):
 
     def run(self):
         try:
+            print(f"Fetching: {GITHUB_API_URL}")
             response = requests.get(GITHUB_API_URL, timeout=10)
+            print(f"Response status: {response.status_code}")
             if response.status_code == 200:
                 data = response.json()
                 latest_version = data.get("tag_name", "").lstrip("v")
+                print(f"Latest version on GitHub: {latest_version}")
+                print(f"Current version: {self.current_version}")
 
                 # Find Windows executable in assets
                 download_url = None
                 for asset in data.get("assets", []):
                     if asset.get("name", "").endswith(".exe"):
                         download_url = asset.get("browser_download_url")
+                        print(f"Found exe: {asset.get('name')}")
                         break
 
                 if latest_version and self._is_newer(latest_version):
+                    print(f"Update available! {self.current_version} -> {latest_version}")
                     self.update_available.emit(latest_version, download_url or "")
                 else:
+                    print("No update needed")
                     self.no_update.emit()
             else:
+                print(f"HTTP error: {response.status_code}")
                 self.error.emit(f"HTTP {response.status_code}")
         except Exception as e:
+            print(f"Exception: {e}")
             self.error.emit(str(e))
 
     def _is_newer(self, latest: str) -> bool:
@@ -715,8 +724,11 @@ class MainWindow(QMainWindow):
     def check_for_updates(self):
         """Check GitHub for new version"""
         from config import APP_VERSION
+        print(f"Checking for updates... Current version: {APP_VERSION}")
         self.update_checker = UpdateChecker(APP_VERSION)
         self.update_checker.update_available.connect(self.on_update_available)
+        self.update_checker.no_update.connect(lambda: print("No update available"))
+        self.update_checker.error.connect(lambda e: print(f"Update check error: {e}"))
         self.update_checker.start()
 
     def on_update_available(self, version: str, download_url: str):
