@@ -1,15 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
+
+# Collect all pygame dependencies (DLLs, data files)
+pygame_datas, pygame_binaries, pygame_hiddenimports = collect_all('pygame')
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
+    binaries=pygame_binaries,
     datas=[
         ('.env', '.'),
         ('sound', 'sound'),
-    ],
+    ] + pygame_datas,
     hiddenimports=[
         'supabase',
         'postgrest',
@@ -19,7 +23,7 @@ a = Analysis(
         'httpx',
         'httpcore',
         'pygame',
-    ],
+    ] + pygame_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
