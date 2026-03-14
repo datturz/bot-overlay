@@ -24,18 +24,9 @@ from PyQt5.QtGui import QColor, QPalette
 
 import requests
 
-# Try to import pygame for audio with volume control
-PYGAME_AVAILABLE = False
-try:
-    import pygame
-    pygame.mixer.init()
-    PYGAME_AVAILABLE = True
-except ImportError:
-    pass
-
-# Fallback to winsound (no volume control)
+# Use winsound for Windows audio
 WINSOUND_AVAILABLE = False
-if not PYGAME_AVAILABLE and platform.system() == "Windows":
+if platform.system() == "Windows":
     try:
         import winsound
         WINSOUND_AVAILABLE = True
@@ -929,21 +920,13 @@ del "%~f0"
         threading.Thread(target=self._play_wav, args=(sound_file,), daemon=True).start()
 
     def _play_wav(self, sound_file: str):
-        """Play WAV file with volume control using pygame, or fallback to winsound/afplay"""
+        """Play WAV file using winsound (Windows) or afplay (macOS)"""
         try:
-            if PYGAME_AVAILABLE:
-                # Use pygame for volume control
-                sound = pygame.mixer.Sound(sound_file)
-                sound.set_volume(self.sound_volume / 100.0)  # pygame uses 0.0-1.0
-                sound.play()
-            elif WINSOUND_AVAILABLE:
-                # Fallback: winsound (no volume control)
+            if WINSOUND_AVAILABLE:
                 winsound.PlaySound(sound_file, winsound.SND_FILENAME | winsound.SND_ASYNC)
             elif platform.system() == "Darwin":
-                # macOS: use afplay command with volume
-                import subprocess
-                volume = self.sound_volume / 100.0 * 2  # afplay uses 0-2 range
-                subprocess.Popen(["afplay", "-v", str(volume), sound_file],
+                # macOS: use afplay command
+                subprocess.Popen(["afplay", sound_file],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
                 print("Audio not supported on this platform")
