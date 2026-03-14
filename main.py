@@ -115,13 +115,34 @@ class UpdateDownloader(QThread):
 
     def run(self):
         try:
-            # Download to temp file with longer timeout
-            response = requests.get(self.download_url, stream=True, timeout=300)
+            print(f"Downloading from: {self.download_url}")
+
+            # Use session for proper redirect handling
+            session = requests.Session()
+            session.headers.update({
+                'User-Agent': 'L2M-BossTimer-Updater/1.0',
+                'Accept': 'application/octet-stream'
+            })
+
+            # Download with redirect following
+            response = session.get(
+                self.download_url,
+                stream=True,
+                timeout=300,
+                allow_redirects=True
+            )
             response.raise_for_status()
 
+            # Check content type - should be binary
+            content_type = response.headers.get('content-type', '')
+            print(f"Content-Type: {content_type}")
+
             total_size = int(response.headers.get('content-length', 0))
-            if total_size == 0:
-                self.error.emit("Could not determine file size")
+            print(f"Total size: {total_size} bytes")
+
+            # Minimum size check (exe should be at least 10MB)
+            if total_size < 10 * 1024 * 1024:
+                self.error.emit(f"File too small ({total_size} bytes). Download may have failed.")
                 return
 
             temp_dir = tempfile.gettempdir()
@@ -129,7 +150,7 @@ class UpdateDownloader(QThread):
 
             downloaded = 0
             with open(temp_file, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=65536):  # Larger chunks
+                for chunk in response.iter_content(chunk_size=65536):
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
@@ -138,12 +159,19 @@ class UpdateDownloader(QThread):
 
             # Verify download completed
             actual_size = os.path.getsize(temp_file)
+            print(f"Downloaded: {actual_size} bytes")
+
             if actual_size != total_size:
                 self.error.emit(f"Download incomplete: {actual_size}/{total_size} bytes")
                 return
 
+            if actual_size < 10 * 1024 * 1024:
+                self.error.emit(f"Downloaded file too small: {actual_size} bytes")
+                return
+
             self.finished.emit(temp_file)
         except Exception as e:
+            print(f"Download error: {e}")
             self.error.emit(str(e))
 
 
