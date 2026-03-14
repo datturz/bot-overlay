@@ -24,9 +24,18 @@ from PyQt5.QtGui import QColor, QPalette
 
 import requests
 
-# Try to import winsound for Windows audio (reliable in background)
+# Try to import pygame for audio with volume control
+PYGAME_AVAILABLE = False
+try:
+    import pygame
+    pygame.mixer.init()
+    PYGAME_AVAILABLE = True
+except ImportError:
+    pass
+
+# Fallback to winsound (no volume control)
 WINSOUND_AVAILABLE = False
-if platform.system() == "Windows":
+if not PYGAME_AVAILABLE and platform.system() == "Windows":
     try:
         import winsound
         WINSOUND_AVAILABLE = True
@@ -920,14 +929,22 @@ del "%~f0"
         threading.Thread(target=self._play_wav, args=(sound_file,), daemon=True).start()
 
     def _play_wav(self, sound_file: str):
-        """Play WAV file using winsound (Windows) or afplay (macOS)"""
+        """Play WAV file with volume control using pygame, or fallback to winsound/afplay"""
         try:
-            if WINSOUND_AVAILABLE:
+            if PYGAME_AVAILABLE:
+                # Use pygame for volume control
+                sound = pygame.mixer.Sound(sound_file)
+                sound.set_volume(self.sound_volume / 100.0)  # pygame uses 0.0-1.0
+                sound.play()
+            elif WINSOUND_AVAILABLE:
+                # Fallback: winsound (no volume control)
                 winsound.PlaySound(sound_file, winsound.SND_FILENAME | winsound.SND_ASYNC)
             elif platform.system() == "Darwin":
-                # macOS: use afplay command
+                # macOS: use afplay command with volume
                 import subprocess
-                subprocess.Popen(["afplay", sound_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                volume = self.sound_volume / 100.0 * 2  # afplay uses 0-2 range
+                subprocess.Popen(["afplay", "-v", str(volume), sound_file],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
                 print("Audio not supported on this platform")
         except Exception as e:

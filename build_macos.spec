@@ -19,6 +19,7 @@ a = Analysis(
         'gotrue',
         'httpx',
         'httpcore',
+        'pygame',
     ],
     hookspath=[],
     hooksconfig={},
