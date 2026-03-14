@@ -551,6 +551,25 @@ class MainWindow(QMainWindow):
         self.volume_label.setStyleSheet("color: #aaa; font-size: 9px;")
         layout.addWidget(self.volume_label)
 
+        # Test sound button
+        self.test_sound_btn = QPushButton("🔊")
+        self.test_sound_btn.setFixedSize(22, 22)
+        self.test_sound_btn.setToolTip("Test Sound")
+        self.test_sound_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0f3460;
+                color: #fff;
+                border: none;
+                border-radius: 3px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #e94560;
+            }
+        """)
+        self.test_sound_btn.clicked.connect(self.test_sound)
+        layout.addWidget(self.test_sound_btn)
+
         # Overlay toggle button
         self.overlay_btn = QPushButton("Overlay")
         self.overlay_btn.setFixedSize(50, 22)
@@ -997,6 +1016,19 @@ del "%~f0"
                     font-weight: bold;
                 }
             """)
+
+    def test_sound(self):
+        """Play a test sound to check volume"""
+        if not self.sound_enabled:
+            return
+
+        # Try to play boss_spawn.wav as test
+        test_file = self.sound_files.get("ours_spawn")
+        if test_file and os.path.exists(test_file):
+            threading.Thread(target=self._play_wav, args=(test_file,), daemon=True).start()
+        else:
+            # Fallback to beep
+            self._play_beep(False)
 
     def toggle_overlay_mode(self):
         """Toggle between normal window and overlay mode"""
