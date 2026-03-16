@@ -12,6 +12,7 @@ import platform
 import subprocess
 import tempfile
 import shutil
+import ctypes
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Set
 from PyQt5.QtWidgets import (
@@ -24,14 +25,29 @@ from PyQt5.QtGui import QColor, QPalette
 
 import requests
 
-# Use winsound for Windows audio
+# Use winsound for Windows audio with volume control via waveOutSetVolume
 WINSOUND_AVAILABLE = False
+WAVE_VOLUME_AVAILABLE = False
 if platform.system() == "Windows":
     try:
         import winsound
         WINSOUND_AVAILABLE = True
     except ImportError:
         pass
+    # Setup waveOutSetVolume for volume control
+    try:
+        import ctypes
+        from ctypes import wintypes
+        winmm = ctypes.WinDLL('winmm.dll')
+        # waveOutSetVolume sets the volume for wave audio
+        # Volume is DWORD where low word = left, high word = right (0x0000 to 0xFFFF)
+        winmm.waveOutSetVolume.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        winmm.waveOutSetVolume.restype = wintypes.UINT
+        winmm.waveOutGetVolume.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        winmm.waveOutGetVolume.restype = wintypes.UINT
+        WAVE_VOLUME_AVAILABLE = True
+    except Exception as e:
+        print(f"Wave volume control not available: {e}")
 
 from config import (
     APP_TITLE, APP_VERSION, WARNING_MINUTES_YELLOW, WARNING_MINUTES_RED,
@@ -966,18 +982,55 @@ del "%~f0"
         threading.Thread(target=self._play_wav, args=(sound_file,), daemon=True).start()
 
     def _play_wav(self, sound_file: str):
-        """Play WAV file using winsound (Windows) or afplay (macOS)"""
+        """Play WAV file with volume control"""
         try:
-            if WINSOUND_AVAILABLE:
-                winsound.PlaySound(sound_file, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            if WINSOUND_AVAILABLE and platform.system() == "Windows":
+                # Set wave volume before playing, then restore after
+                if WAVE_VOLUME_AVAILABLE:
+                    self._play_with_volume(sound_file)
+                else:
+                    winsound.PlaySound(sound_file, winsound.SND_FILENAME | winsound.SND_ASYNC)
             elif platform.system() == "Darwin":
-                # macOS: use afplay command
-                subprocess.Popen(["afplay", sound_file],
+                # macOS: use afplay with volume control
+                volume = self.sound_volume / 100.0 * 2  # afplay uses 0-2 range
+                subprocess.Popen(["afplay", "-v", str(volume), sound_file],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
                 print("Audio not supported on this platform")
         except Exception as e:
             print(f"Sound error: {e}")
+            # Fallback to winsound without volume
+            if WINSOUND_AVAILABLE:
+                try:
+                    winsound.PlaySound(sound_file, winsound.SND_FILENAME | winsound.SND_ASYNC)
+                except:
+                    pass
+
+    def _play_with_volume(self, sound_file: str):
+        """Play WAV file with volume control using waveOutSetVolume"""
+        try:
+            # Save original volume
+            original_volume = ctypes.c_ulong()
+            winmm.waveOutGetVolume(0, ctypes.byref(original_volume))
+
+            # Set new volume (0-100 to 0-0xFFFF for both channels)
+            volume_value = int((self.sound_volume / 100.0) * 0xFFFF)
+            new_volume = volume_value | (volume_value << 16)  # Same for left and right
+            winmm.waveOutSetVolume(0, new_volume)
+
+            # Play the sound (SND_SYNC to wait, then restore volume)
+            winsound.PlaySound(sound_file, winsound.SND_FILENAME)
+
+            # Restore original volume
+            winmm.waveOutSetVolume(0, original_volume.value)
+
+        except Exception as e:
+            print(f"Volume control error: {e}")
+            # Fallback: just play without volume control
+            try:
+                winsound.PlaySound(sound_file, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            except:
+                pass
 
     def _play_beep(self, is_spawn: bool):
         """Play beep sound as fallback"""
