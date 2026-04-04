@@ -927,9 +927,49 @@ del "%~f0"
         for widget in self.boss_widgets:
             widget.update_timer()
 
+        # Re-sort widgets by countdown every 30 seconds
+        self._sort_tick = getattr(self, '_sort_tick', 0) + 1
+        if self._sort_tick >= 30:
+            self._sort_tick = 0
+            self._resort_boss_widgets()
+
         # Check for sound notifications
         if self.sound_enabled:
             self.check_boss_notifications()
+
+    def _resort_boss_widgets(self):
+        """Re-sort boss widgets by countdown without refetching from DB."""
+        if not self.boss_widgets:
+            return
+
+        def sort_key(widget):
+            boss = widget.boss_data
+            kill_time = boss.get("kill_time", "00:00")
+            interval = boss.get("interval", 8)
+            if not kill_time:
+                return float('inf')
+            countdown = db.calculate_countdown_seconds(kill_time, interval)
+            if -SPAWN_DISPLAY_SECONDS <= countdown <= 0:
+                return countdown
+            if countdown < -SPAWN_DISPLAY_SECONDS:
+                return float('inf')
+            return countdown
+
+        sorted_widgets = sorted(self.boss_widgets, key=sort_key)
+
+        # Check if order actually changed
+        if sorted_widgets == self.boss_widgets:
+            return
+
+        # Remove stretch and all widgets from layout
+        while self.boss_layout.count() > 0:
+            self.boss_layout.takeAt(0)
+
+        # Re-add in sorted order
+        self.boss_widgets = sorted_widgets
+        for widget in self.boss_widgets:
+            self.boss_layout.addWidget(widget)
+        self.boss_layout.addStretch()
 
     def check_boss_notifications(self):
         """Check if any boss needs sound notification"""
