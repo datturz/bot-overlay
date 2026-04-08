@@ -991,21 +991,31 @@ del "%~f0"
             if boss_id not in self.announced_bosses:
                 self.announced_bosses[boss_id] = set()
 
+            # Reset announcements when boss enters new spawn cycle
+            # (countdown > 5 min means we're waiting for next cycle)
+            if total_seconds > 300:
+                if self.announced_bosses[boss_id]:
+                    self.announced_bosses[boss_id].clear()
+                continue
+
             # Check if boss has spawned
             if total_seconds <= 0:
                 if 0 not in self.announced_bosses[boss_id]:
                     self.announced_bosses[boss_id].add(0)
                     self.play_sound(boss_type, "spawn")
+                    print(f"[Sound] {boss_name} SPAWN!")
                 continue
 
             # Announce at 5 minutes (between 4:01 and 5:00)
             if 240 < total_seconds <= 300 and 5 not in self.announced_bosses[boss_id]:
                 self.announced_bosses[boss_id].add(5)
                 self.play_sound(boss_type, "5min")
+                print(f"[Sound] {boss_name} 5min warning")
             # Announce at 1 minute (between 0:01 and 1:00)
             elif 0 < total_seconds <= 60 and 1 not in self.announced_bosses[boss_id]:
                 self.announced_bosses[boss_id].add(1)
                 self.play_sound(boss_type, "1min")
+                print(f"[Sound] {boss_name} 1min warning")
 
     def play_sound(self, boss_type: str, alert_type: str):
         """Play sound file in background thread"""
@@ -1047,30 +1057,31 @@ del "%~f0"
                     pass
 
     def _play_with_volume(self, sound_file: str):
-        """Play WAV file with volume control using waveOutSetVolume"""
-        try:
-            # Save original volume
-            original_volume = ctypes.c_ulong()
-            winmm.waveOutGetVolume(0, ctypes.byref(original_volume))
-
-            # Set new volume (0-100 to 0-0xFFFF for both channels)
-            volume_value = int((self.sound_volume / 100.0) * 0xFFFF)
-            new_volume = volume_value | (volume_value << 16)  # Same for left and right
-            winmm.waveOutSetVolume(0, new_volume)
-
-            # Play the sound (SND_SYNC to wait, then restore volume)
-            winsound.PlaySound(sound_file, winsound.SND_FILENAME)
-
-            # Restore original volume
-            winmm.waveOutSetVolume(0, original_volume.value)
-
-        except Exception as e:
-            print(f"Volume control error: {e}")
-            # Fallback: just play without volume control
+        """Play WAV file with volume control using waveOutSetVolume.
+        Uses sound_lock to prevent concurrent volume changes."""
+        with self.sound_lock:
             try:
-                winsound.PlaySound(sound_file, winsound.SND_FILENAME | winsound.SND_ASYNC)
-            except:
-                pass
+                # Save original volume
+                original_volume = ctypes.c_ulong()
+                winmm.waveOutGetVolume(0, ctypes.byref(original_volume))
+
+                # Set new volume (0-100 to 0-0xFFFF for both channels)
+                volume_value = int((self.sound_volume / 100.0) * 0xFFFF)
+                new_volume = volume_value | (volume_value << 16)
+                winmm.waveOutSetVolume(0, new_volume)
+
+                # Play the sound (SND_SYNC to wait, then restore volume)
+                winsound.PlaySound(sound_file, winsound.SND_FILENAME)
+
+                # Restore original volume
+                winmm.waveOutSetVolume(0, original_volume.value)
+
+            except Exception as e:
+                print(f"Volume control error: {e}")
+                try:
+                    winsound.PlaySound(sound_file, winsound.SND_FILENAME | winsound.SND_ASYNC)
+                except Exception as e2:
+                    print(f"Fallback sound error: {e2}")
 
     def _play_beep(self, is_spawn: bool):
         """Play beep sound as fallback"""
