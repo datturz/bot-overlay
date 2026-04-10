@@ -874,15 +874,20 @@ class MainWindow(QMainWindow):
                 return
 
             # Create batch script to replace exe and restart
+            exe_name = os.path.basename(current_exe)
             batch_content = f'''@echo off
 echo Waiting for application to close...
 timeout /t 3 /nobreak > nul
-echo Copying update...
+
+:retry
+echo Attempting to copy update...
+taskkill /f /im "{exe_name}" >nul 2>&1
+timeout /t 2 /nobreak > nul
 copy /y "{temp_file}" "{current_exe}"
 if errorlevel 1 (
-    echo Copy failed, retrying...
-    timeout /t 2 /nobreak > nul
-    copy /y "{temp_file}" "{current_exe}"
+    echo Copy failed, retrying in 5 seconds...
+    timeout /t 5 /nobreak > nul
+    goto retry
 )
 del "{temp_file}" 2>nul
 echo Starting updated application...
