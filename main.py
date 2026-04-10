@@ -59,8 +59,8 @@ from database import db
 # Constants
 SPAWN_DISPLAY_SECONDS = 180  # 3 minutes before moving to bottom
 POLLING_INTERVAL_MS = 7200000  # 2 hours polling interval
-PIN_CHECK_INTERVAL_MS = 300000  # 5 minutes PIN validation interval
-UPDATE_CHECK_INTERVAL_MS = 600000  # 10 minutes update check interval
+PIN_CHECK_INTERVAL_MS = 7200000  # 2 hours PIN validation interval
+UPDATE_CHECK_INTERVAL_MS = 7200000  # 2 hours update check interval
 
 # GitHub repository for updates
 GITHUB_REPO = "datturz/bot-overlay"
