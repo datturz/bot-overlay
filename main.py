@@ -799,16 +799,11 @@ class MainWindow(QMainWindow):
             self._show_force_update_dialog(version)
 
     def _needs_force_update(self, current: str, latest: str) -> bool:
-        """Check if current version is too old (major or minor version behind)."""
+        """Force update if any newer version exists."""
         try:
             cur = [int(x) for x in current.split(".")]
             lat = [int(x) for x in latest.split(".")]
-            # Force if major version behind, or minor version 2+ behind
-            if lat[0] > cur[0]:
-                return True
-            if lat[0] == cur[0] and (lat[1] - cur[1]) >= 2:
-                return True
-            return False
+            return lat > cur
         except Exception:
             return False
 
