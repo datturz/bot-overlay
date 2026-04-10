@@ -31,7 +31,7 @@ GMT_PLUS_7 = timezone(timedelta(hours=7))
 
 # App settings
 APP_TITLE = "L2M Boss Timer"
-APP_VERSION = "2.3.1"
+APP_VERSION = "2.3.2"
 
 # Timer settings
 WARNING_MINUTES_YELLOW = 30  # Yellow warning 30 minutes before spawn

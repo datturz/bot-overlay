@@ -786,12 +786,51 @@ class MainWindow(QMainWindow):
         self.update_checker.start()
 
     def on_update_available(self, version: str, download_url: str):
-        """Called when new version is found"""
+        """Called when new version is found. Force update if too old."""
         self.latest_version = version
         self.download_url = download_url
         self.update_btn.setText(f"v{version}")
         self.update_btn.setToolTip(f"Update available: v{version}\nClick to download and install")
         self.update_btn.show()
+
+        # Force update: if current version < minimum required, block app
+        from config import APP_VERSION
+        if self._needs_force_update(APP_VERSION, version):
+            self._show_force_update_dialog(version)
+
+    def _needs_force_update(self, current: str, latest: str) -> bool:
+        """Check if current version is too old (major or minor version behind)."""
+        try:
+            cur = [int(x) for x in current.split(".")]
+            lat = [int(x) for x in latest.split(".")]
+            # Force if major version behind, or minor version 2+ behind
+            if lat[0] > cur[0]:
+                return True
+            if lat[0] == cur[0] and (lat[1] - cur[1]) >= 2:
+                return True
+            return False
+        except Exception:
+            return False
+
+    def _show_force_update_dialog(self, version: str):
+        """Show blocking dialog — user must update to continue."""
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Warning)
+        msg.setWindowTitle("Update Required")
+        msg.setText(f"Versi kamu terlalu lama!\n\n"
+                    f"Versi terbaru: v{version}\n"
+                    f"Kamu harus update untuk melanjutkan.")
+        msg.setInformativeText("Klik Update untuk download sekarang.")
+        update_btn = msg.addButton("Update Now", QMessageBox.AcceptRole)
+        exit_btn = msg.addButton("Exit", QMessageBox.RejectRole)
+        msg.setDefaultButton(update_btn)
+        msg.exec_()
+
+        if msg.clickedButton() == update_btn:
+            self.do_update()
+        else:
+            # User chose exit — close app
+            self.close()
 
     def do_update(self):
         """Download and install update"""
