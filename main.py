@@ -875,31 +875,42 @@ class MainWindow(QMainWindow):
 
             # Create batch script to replace exe and restart
             exe_name = os.path.basename(current_exe)
+            exe_dir = os.path.dirname(current_exe)
+            batch_file = os.path.join(exe_dir, "update_l2m.bat")
             batch_content = f'''@echo off
 echo Waiting for application to close...
+timeout /t 5 /nobreak > nul
+taskkill /f /im "{exe_name}" >nul 2>&1
 timeout /t 3 /nobreak > nul
 
 :retry
-echo Attempting to copy update...
-taskkill /f /im "{exe_name}" >nul 2>&1
-timeout /t 2 /nobreak > nul
+echo Copying update...
 copy /y "{temp_file}" "{current_exe}"
 if errorlevel 1 (
     echo Copy failed, retrying in 5 seconds...
+    taskkill /f /im "{exe_name}" >nul 2>&1
     timeout /t 5 /nobreak > nul
     goto retry
 )
 del "{temp_file}" 2>nul
 echo Starting updated application...
+cd /d "{exe_dir}"
 start "" "{current_exe}"
+timeout /t 3 /nobreak > nul
 del "%~f0"
 '''
-            batch_file = os.path.join(tempfile.gettempdir(), "update_l2m.bat")
             with open(batch_file, 'w') as f:
                 f.write(batch_content)
 
-            # Run batch and exit
-            subprocess.Popen(['cmd', '/c', batch_file], shell=True)
+            # Launch batch fully detached from this process
+            CREATE_NEW_PROCESS_GROUP = 0x00000200
+            DETACHED_PROCESS = 0x00000008
+            subprocess.Popen(
+                ['cmd', '/c', batch_file],
+                creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
+                close_fds=True,
+                cwd=exe_dir,
+            )
             QApplication.quit()
 
         except Exception as e:
