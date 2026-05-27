@@ -9,13 +9,6 @@ from typing import Optional, List, Dict
 from supabase import create_client, Client
 from config import SUPABASE_URL, SUPABASE_KEY, GMT_PLUS_7
 
-# FFA (Free For All) boss list - high value bosses anyone can kill
-FFA_BOSSES = [
-    "Samuel", "Glaki", "Flynt", "Dragon Beast", "Cabrio", "Hisilrome",
-    "Mirror of Oblivion", "Landor", "Haff", "Andras", "Olkuth", "Orfen"
-]
-
-
 class Database:
     def __init__(self):
         self.client: Optional[Client] = None
@@ -46,15 +39,13 @@ class Database:
             return []
 
     def get_bosses_by_type(self, boss_type: str) -> List[Dict]:
-        """Get bosses filtered by type (ours/invasion/ffa)"""
+        """Get bosses filtered by type (ours/invasion) or category (ffa/red/blue)"""
         try:
-            if boss_type == "ffa":
-                # FFA is not a database type, filter by name
-                result = self.client.table(self.table_name).select("*").execute()
-                return [b for b in (result.data or []) if b.get("name") in FFA_BOSSES]
+            if boss_type in ("ffa", "red", "blue"):
+                result = self.client.table(self.table_name).select("*").eq("category", boss_type).execute()
             else:
                 result = self.client.table(self.table_name).select("*").eq("type", boss_type).execute()
-                return result.data or []
+            return result.data or []
         except Exception as e:
             print(f"Get bosses by type error: {e}")
             return []
