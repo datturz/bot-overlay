@@ -876,22 +876,27 @@ class MainWindow(QMainWindow):
             # Create batch script to replace exe and restart
             exe_name = os.path.basename(current_exe)
             exe_dir = os.path.dirname(current_exe)
+            old_exe = current_exe + ".old"
             batch_file = os.path.join(exe_dir, "update_l2m.bat")
             batch_content = f'''@echo off
 echo Waiting for application to close...
-timeout /t 5 /nobreak > nul
-taskkill /f /im "{exe_name}" >nul 2>&1
 timeout /t 3 /nobreak > nul
+taskkill /f /im "{exe_name}" >nul 2>&1
+timeout /t 2 /nobreak > nul
 
 :retry
+echo Renaming old exe...
+del "{old_exe}" 2>nul
+move /y "{current_exe}" "{old_exe}" >nul 2>&1
 echo Copying update...
 copy /y "{temp_file}" "{current_exe}"
 if errorlevel 1 (
-    echo Copy failed, retrying in 5 seconds...
+    echo Copy failed, retrying in 3 seconds...
     taskkill /f /im "{exe_name}" >nul 2>&1
-    timeout /t 5 /nobreak > nul
+    timeout /t 3 /nobreak > nul
     goto retry
 )
+del "{old_exe}" 2>nul
 del "{temp_file}" 2>nul
 echo Starting updated application...
 cd /d "{exe_dir}"
@@ -911,7 +916,7 @@ del "%~f0"
                 close_fds=True,
                 cwd=exe_dir,
             )
-            QApplication.quit()
+            sys.exit(0)
 
         except Exception as e:
             QMessageBox.critical(self, "Update Error", f"Failed to install update:\n{e}")
