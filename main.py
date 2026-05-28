@@ -786,92 +786,54 @@ class MainWindow(QMainWindow):
         self.update_checker.start()
 
     def on_update_available(self, version: str, download_url: str):
-        """Called when new version is found. Force update if too old."""
+        """Auto-update: download and install immediately, no user interaction."""
         self.latest_version = version
         self.download_url = download_url
-        self.update_btn.setText(f"v{version}")
-        self.update_btn.setToolTip(f"Update available: v{version}\nClick to download and install")
+        print(f"[Updater] Auto-updating to v{version}...")
+
+        if not download_url:
+            print("[Updater] No download URL, skip")
+            return
+
+        self.update_btn.setText(f"Updating...")
         self.update_btn.show()
 
-        # Force update: if current version < minimum required, block app
-        from config import APP_VERSION
-        if self._needs_force_update(APP_VERSION, version):
-            self._show_force_update_dialog(version)
-
-    def _needs_force_update(self, current: str, latest: str) -> bool:
-        """Force update if any newer version exists."""
-        try:
-            cur = [int(x) for x in current.split(".")]
-            lat = [int(x) for x in latest.split(".")]
-            return lat > cur
-        except Exception:
-            return False
-
-    def _show_force_update_dialog(self, version: str):
-        """Show blocking dialog — user must update to continue."""
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Warning)
-        msg.setWindowTitle("Update Required")
-        msg.setText(f"Versi kamu terlalu lama!\n\n"
-                    f"Versi terbaru: v{version}\n"
-                    f"Kamu harus update untuk melanjutkan.")
-        msg.setInformativeText("Klik Update untuk download sekarang.")
-        update_btn = msg.addButton("Update Now", QMessageBox.AcceptRole)
-        exit_btn = msg.addButton("Exit", QMessageBox.RejectRole)
-        msg.setDefaultButton(update_btn)
-        msg.exec_()
-
-        if msg.clickedButton() == update_btn:
-            self.do_update()
-        else:
-            # User chose exit — close app
-            self.close()
-
-    def do_update(self):
-        """Download and install update"""
-        if not self.download_url:
-            QMessageBox.warning(self, "Update Error", "No download URL available")
-            return
-
-        reply = QMessageBox.question(
-            self,
-            "Update Available",
-            f"Download and install v{self.latest_version}?\n\nThe application will restart after update.",
-            QMessageBox.Yes | QMessageBox.No
-        )
-
-        if reply != QMessageBox.Yes:
-            return
-
-        # Show progress dialog
-        self.progress_dialog = QProgressDialog("Downloading update...", "Cancel", 0, 100, self)
-        self.progress_dialog.setWindowTitle("Updating")
+        # Show progress dialog (non-cancellable)
+        self.progress_dialog = QProgressDialog(
+            f"Mengupdate ke v{version}...", None, 0, 100, self)
+        self.progress_dialog.setWindowTitle("Auto Update")
         self.progress_dialog.setWindowModality(Qt.WindowModal)
+        self.progress_dialog.setCancelButton(None)
         self.progress_dialog.setAutoClose(False)
         self.progress_dialog.show()
 
-        # Start download
-        self.update_downloader = UpdateDownloader(self.download_url)
+        # Start download immediately
+        self.update_downloader = UpdateDownloader(download_url)
         self.update_downloader.progress.connect(self.on_download_progress)
         self.update_downloader.finished.connect(self.on_download_finished)
         self.update_downloader.error.connect(self.on_download_error)
         self.update_downloader.start()
+
+    def do_update(self):
+        """Manual trigger — same as auto-update."""
+        if self.download_url and self.latest_version:
+            self.on_update_available(self.latest_version, self.download_url)
 
     def on_download_progress(self, percent: int):
         """Update progress bar"""
         self.progress_dialog.setValue(percent)
 
     def on_download_finished(self, temp_file: str):
-        """Download complete - install update"""
-        self.progress_dialog.close()
+        """Download complete — install and restart automatically."""
+        self.progress_dialog.setLabelText("Installing update...")
+        self.progress_dialog.setValue(100)
 
         try:
-            # Get current executable path
-            if getattr(sys, 'frozen', False):
-                current_exe = sys.executable
-            else:
-                QMessageBox.information(self, "Update", "Update downloaded. Please restart in production mode.")
+            if not getattr(sys, 'frozen', False):
+                self.progress_dialog.close()
+                print("[Updater] Dev mode — skip install")
                 return
+            current_exe = sys.executable
 
             # Create batch script to replace exe and restart
             exe_name = os.path.basename(current_exe)
@@ -919,12 +881,13 @@ del "%~f0"
             sys.exit(0)
 
         except Exception as e:
-            QMessageBox.critical(self, "Update Error", f"Failed to install update:\n{e}")
+            self.progress_dialog.close()
+            print(f"[Updater] Install error: {e}")
 
     def on_download_error(self, error: str):
-        """Download failed"""
+        """Download failed — close progress silently, app continues."""
         self.progress_dialog.close()
-        QMessageBox.critical(self, "Download Error", f"Failed to download update:\n{error}")
+        print(f"[Updater] Download failed: {error}")
 
     def refresh_bosses(self):
         """Refresh boss list from database"""
