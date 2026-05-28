@@ -7,6 +7,7 @@ Read-only mode with auto-refresh every 1 minute
 
 import sys
 import os
+import time
 import threading
 import platform
 import subprocess
@@ -819,10 +820,51 @@ class MainWindow(QMainWindow):
         self.update_checker.error.connect(lambda e: print(f"Update check error: {e}"))
         self.update_checker.start()
 
+    def _get_update_state_path(self) -> str:
+        """Path to JSON file tracking last update attempt (per-user, non-OneDrive)."""
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        d = os.path.join(base, "L2M_BossTimer")
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, "update_state.json")
+
+    def _load_update_attempt(self) -> dict:
+        try:
+            import json as _json
+            with open(self._get_update_state_path(), "r") as f:
+                return _json.load(f)
+        except Exception:
+            return {}
+
+    def _save_update_attempt(self, version: str):
+        try:
+            import json as _json
+            with open(self._get_update_state_path(), "w") as f:
+                _json.dump({"version": version, "ts": time.time()}, f)
+        except Exception:
+            pass
+
+    def _should_skip_update(self, version: str) -> bool:
+        """Skip auto-prompt if we attempted this same version <6h ago (failed install)."""
+        state = self._load_update_attempt()
+        if state.get("version") != version:
+            return False
+        elapsed = time.time() - state.get("ts", 0)
+        if elapsed < 6 * 3600:
+            print(f"[Updater] Skip v{version} — last attempt {elapsed/60:.0f}m ago (<6h cooldown)")
+            return True
+        return False
+
     def on_update_available(self, version: str, download_url: str):
         """Auto-update: download and install immediately, no user interaction."""
         self.latest_version = version
         self.download_url = download_url
+
+        if self._should_skip_update(version):
+            self.update_btn.setText(f"v{version}")
+            self.update_btn.setToolTip(f"Update v{version} pending — restart to retry")
+            self.update_btn.show()
+            return
+
         print(f"[Updater] Auto-updating to v{version}...")
 
         if not download_url:
@@ -862,6 +904,9 @@ class MainWindow(QMainWindow):
         self.progress_dialog.setLabelText("Installing update...")
         self.progress_dialog.setValue(100)
 
+        # Remember which version we attempted (cooldown if fails)
+        self._save_update_attempt(self.latest_version)
+
         try:
             if not getattr(sys, 'frozen', False):
                 self.progress_dialog.close()
@@ -874,30 +919,33 @@ class MainWindow(QMainWindow):
             exe_dir = os.path.dirname(current_exe)
             old_exe = current_exe + ".old"
             batch_file = os.path.join(exe_dir, "update_l2m.bat")
+            # PowerShell-driven install: handles OneDrive/Defender locks via
+            # Move-Item -Force (atomic rename) + retry with backoff.
+            ps_script = (
+                "$ErrorActionPreference='SilentlyContinue';"
+                f"$cur='{current_exe}';$tmp='{temp_file}';$old='{current_exe}.old';"
+                "if(Test-Path $old){Remove-Item $old -Force};"
+                "$ok=$false;"
+                "for($i=0;$i -lt 30 -and -not $ok;$i++){"
+                "  try{"
+                "    if(Test-Path $cur){Move-Item -Path $cur -Destination $old -Force -ErrorAction Stop};"
+                "    Copy-Item -Path $tmp -Destination $cur -Force -ErrorAction Stop;"
+                "    $ok=$true;"
+                "  }catch{"
+                "    Start-Sleep -Seconds 2;"
+                f"    Get-Process -Name '{os.path.splitext(exe_name)[0]}' -EA SilentlyContinue | Stop-Process -Force -EA SilentlyContinue;"
+                "  }"
+                "};"
+                "if(Test-Path $old){Remove-Item $old -Force};"
+                "if(Test-Path $tmp){Remove-Item $tmp -Force};"
+                "if($ok){Start-Process -FilePath $cur}"
+            )
             batch_content = f'''@echo off
-echo Waiting for application to close...
-timeout /t 3 /nobreak > nul
-taskkill /f /im "{exe_name}" >nul 2>&1
 timeout /t 2 /nobreak > nul
-
-:retry
-echo Renaming old exe...
-del "{old_exe}" 2>nul
-move /y "{current_exe}" "{old_exe}" >nul 2>&1
-echo Copying update...
-copy /y "{temp_file}" "{current_exe}"
-if errorlevel 1 (
-    echo Copy failed, retrying in 3 seconds...
-    taskkill /f /im "{exe_name}" >nul 2>&1
-    timeout /t 3 /nobreak > nul
-    goto retry
-)
-del "{old_exe}" 2>nul
-del "{temp_file}" 2>nul
-echo Starting updated application...
-cd /d "{exe_dir}"
-start "" "{current_exe}"
+taskkill /f /im "{exe_name}" >nul 2>&1
 timeout /t 3 /nobreak > nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command "{ps_script}"
+timeout /t 2 /nobreak > nul
 del "%~f0"
 '''
             with open(batch_file, 'w') as f:
