@@ -66,6 +66,23 @@ UPDATE_CHECK_INTERVAL_MS = 7200000  # 2 hours update check interval
 GITHUB_REPO = "datturz/bot-overlay"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
+# Boss points (clan boss time value). 0 pts and 1 pt on-guard are not shown.
+BOSS_POINTS = {
+    # 5 PTS (FFA tier)
+    "Andras": 5, "Cabrio": 5, "Dragon Beast": 5, "Flynt": 5,
+    "Glaki": 5, "Haff": 5, "Hisilrome": 5, "Landor": 5,
+    "Mirror of Oblivion": 5, "Mirror Of Oblivion": 5,
+    "Olkuth": 5, "Orfen": 5, "Samuel": 5,
+    # 3 PTS (clan boss tier)
+    "Balbo": 3, "Behemoth": 3, "Black Lily": 3,
+    "Contaminated Cruma": 3, "C Cruma": 3,
+    "Core Susceptor": 3, "Coroon": 3,
+    "Gahareth": 3, "Katan": 3, "Kelsus": 3, "Medusa": 3,
+    "Mutated Cruma": 3, "M Cruma": 3,
+    "Queen Ant": 3, "Repiro": 3, "Savan": 3, "Selu": 3,
+    "Stonegeist": 3, "Talakin": 3, "Timiniel": 3, "Timitris": 3,
+}
+
 
 class UpdateChecker(QThread):
     """Background thread to check for updates"""
@@ -308,6 +325,23 @@ class BossTimerWidget(QFrame):
             padding: 2px;
         """)
         layout.addWidget(type_label)
+
+        # Points badge (only show if pts > 0; skip on-guard 1pt)
+        pts = BOSS_POINTS.get(self.boss_data.get("name", ""), 0)
+        if pts > 0:
+            pts_color = "#ffd700" if pts >= 5 else "#ff9933"
+            pts_label = QLabel(f"{pts} PTS")
+            pts_label.setFixedWidth(40)
+            pts_label.setAlignment(Qt.AlignCenter)
+            pts_label.setStyleSheet(f"""
+                background-color: {pts_color};
+                color: #000;
+                font-weight: bold;
+                font-size: 9px;
+                border-radius: 3px;
+                padding: 2px;
+            """)
+            layout.addWidget(pts_label)
 
         # Boss info
         info_layout = QVBoxLayout()
