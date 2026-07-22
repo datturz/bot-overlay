@@ -74,6 +74,7 @@ BOSS_POINTS = {
     "Glaki": 5, "Haff": 5, "Hisilrome": 5, "Landor": 5,
     "Mirror of Oblivion": 5, "Mirror Of Oblivion": 5,
     "Olkuth": 5, "Orfen": 5, "Samuel": 5,
+    "Rahha": 5, "Thanatos": 5,
     # 3 PTS (clan boss tier)
     "Balbo": 3, "Behemoth": 3, "Black Lily": 3,
     "Contaminated Cruma": 3, "C Cruma": 3,
