@@ -394,6 +394,7 @@ class BossTimerWidget(QFrame):
     def update_timer(self):
         """Update the countdown timer display"""
         kill_time = self.boss_data.get("kill_time", "00:00")
+        kill_timestamp = self.boss_data.get("kill_timestamp")
         interval = self.boss_data.get("interval", 8)
 
         if not kill_time:
@@ -408,8 +409,8 @@ class BossTimerWidget(QFrame):
             return
 
         # Calculate spawn time and countdown
-        spawn_time = db.calculate_spawn_time(kill_time, interval)
-        total_seconds = db.calculate_countdown_seconds(kill_time, interval)
+        spawn_time = db.calculate_spawn_time(kill_time, interval, kill_timestamp_str=kill_timestamp)
+        total_seconds = db.calculate_countdown_seconds(kill_time, interval, kill_timestamp_str=kill_timestamp)
 
         # Update spawn time label (HH:MM in GMT+7)
         spawn_time_str = spawn_time.strftime("%H:%M")
@@ -994,10 +995,11 @@ del "%~f0"
         # Sort by countdown (nearest spawn first, just spawned at top, old spawns at bottom)
         def sort_key(b):
             kill_time = b.get("kill_time", "00:00")
+            kill_timestamp = b.get("kill_timestamp")
             interval = b.get("interval", 8)
             if not kill_time:
                 return float('inf')
-            countdown = db.calculate_countdown_seconds(kill_time, interval)
+            countdown = db.calculate_countdown_seconds(kill_time, interval, kill_timestamp_str=kill_timestamp)
             # If just spawned (within 3 minutes), keep at top
             if -SPAWN_DISPLAY_SECONDS <= countdown <= 0:
                 return countdown  # Just spawned stays at top (negative values first)
@@ -1046,10 +1048,11 @@ del "%~f0"
         def sort_key(widget):
             boss = widget.boss_data
             kill_time = boss.get("kill_time", "00:00")
+            kill_timestamp = boss.get("kill_timestamp")
             interval = boss.get("interval", 8)
             if not kill_time:
                 return float('inf')
-            countdown = db.calculate_countdown_seconds(kill_time, interval)
+            countdown = db.calculate_countdown_seconds(kill_time, interval, kill_timestamp_str=kill_timestamp)
             if -SPAWN_DISPLAY_SECONDS <= countdown <= 0:
                 return countdown
             if countdown < -SPAWN_DISPLAY_SECONDS:
@@ -1080,13 +1083,14 @@ del "%~f0"
             boss_name = boss.get("name", "Unknown")
             boss_type = boss.get("type", "ours")
             kill_time = boss.get("kill_time")
+            kill_timestamp = boss.get("kill_timestamp")
             interval = boss.get("interval", 8)
 
             if not kill_time or not boss_id:
                 continue
 
             # Calculate countdown
-            total_seconds = db.calculate_countdown_seconds(kill_time, interval)
+            total_seconds = db.calculate_countdown_seconds(kill_time, interval, kill_timestamp_str=kill_timestamp)
 
             # Initialize tracking for this boss if not exists
             if boss_id not in self.announced_bosses:

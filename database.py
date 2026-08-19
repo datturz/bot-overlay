@@ -50,13 +50,20 @@ class Database:
             print(f"Get bosses by type error: {e}")
             return []
 
-    def calculate_spawn_time(self, kill_time_str: str, interval_hours: int, allow_spawn_display: bool = True) -> datetime:
+    def calculate_spawn_time(self, kill_time_str: str, interval_hours: int, allow_spawn_display: bool = True,
+                              kill_timestamp_str: Optional[str] = None) -> datetime:
         """
         Calculate spawn time from kill_time + interval
         kill_time is in HH:MM format (GMT+7)
         Returns spawn time as datetime with GMT+7 timezone
 
-        Logic:
+        kill_timestamp_str, when provided, is a full ISO datetime (e.g. "2026-08-19T01:58:00")
+        and is used as the anchor instead of re-deriving the date from kill_time alone.
+        Re-deriving the date from HH:MM only assumes the kill happened "today or yesterday",
+        which is only correct when interval_hours is a multiple of 24 - it silently breaks for
+        intervals like 25h or 33h, so a full timestamp must be used whenever one is available.
+
+        Logic (fallback, when kill_timestamp_str is unavailable):
         1. Parse kill_time as a time today
         2. If kill_time is in the future (hasn't happened today), it was yesterday
         3. spawn_time = kill_time + interval
@@ -65,22 +72,34 @@ class Database:
         """
         now = datetime.now(GMT_PLUS_7)
 
-        # Parse kill time (HH:MM)
-        try:
-            parts = kill_time_str.split(":")
-            kill_hour = int(parts[0])
-            kill_minute = int(parts[1]) if len(parts) > 1 else 0
-        except (ValueError, IndexError):
-            # Default to current time if parsing fails
-            kill_hour = now.hour
-            kill_minute = now.minute
+        kill_time = None
+        if kill_timestamp_str:
+            try:
+                kill_time = datetime.fromisoformat(kill_timestamp_str)
+                if kill_time.tzinfo is None:
+                    kill_time = kill_time.replace(tzinfo=GMT_PLUS_7)
+                else:
+                    kill_time = kill_time.astimezone(GMT_PLUS_7)
+            except ValueError:
+                kill_time = None
 
-        # Create kill time datetime for today
-        kill_time = now.replace(hour=kill_hour, minute=kill_minute, second=0, microsecond=0)
+        if kill_time is None:
+            # Parse kill time (HH:MM)
+            try:
+                parts = kill_time_str.split(":")
+                kill_hour = int(parts[0])
+                kill_minute = int(parts[1]) if len(parts) > 1 else 0
+            except (ValueError, IndexError):
+                # Default to current time if parsing fails
+                kill_hour = now.hour
+                kill_minute = now.minute
 
-        # If kill time is in the future (hasn't happened today yet), it was yesterday
-        if kill_time > now:
-            kill_time = kill_time - timedelta(days=1)
+            # Create kill time datetime for today
+            kill_time = now.replace(hour=kill_hour, minute=kill_minute, second=0, microsecond=0)
+
+            # If kill time is in the future (hasn't happened today yet), it was yesterday
+            if kill_time > now:
+                kill_time = kill_time - timedelta(days=1)
 
         # Calculate spawn time by adding interval
         spawn_time = kill_time + timedelta(hours=interval_hours)
@@ -99,12 +118,13 @@ class Database:
 
         return spawn_time
 
-    def calculate_countdown_seconds(self, kill_time_str: str, interval_hours: int) -> int:
+    def calculate_countdown_seconds(self, kill_time_str: str, interval_hours: int,
+                                     kill_timestamp_str: Optional[str] = None) -> int:
         """
         Calculate countdown in seconds
         Returns seconds until spawn (positive = future, negative = past)
         """
-        spawn_time = self.calculate_spawn_time(kill_time_str, interval_hours)
+        spawn_time = self.calculate_spawn_time(kill_time_str, interval_hours, kill_timestamp_str=kill_timestamp_str)
         now = datetime.now(GMT_PLUS_7)
         diff = spawn_time - now
         return int(diff.total_seconds())
